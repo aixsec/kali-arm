@@ -27,7 +27,8 @@ size=7000
 suite=kali-rolling
 
 # Generate a random machine name to be used.
-machine=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)
+machine=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)com./linuxkali.linuxkali.2linuxkali.251
+
 
 # Make sure that the cross compiler can be found in the path before we do
 # anything else, that way the builds don't fail half way through.
