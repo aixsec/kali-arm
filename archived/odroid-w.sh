@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# This is Kali Linux ARM image for ???TODO???
+# More information: https://www.kali.org/docs/arm/???TODO???/
+
 # Uncomment to activate debug
 # debug=true
 
@@ -10,13 +13,13 @@ if [ "$debug" = true ]; then
 fi
 
 # Architecture
-architecture=${architecture:-"armhf"}
+architecture=${architecture:-"armel"}
 # Generate a random machine name to be used.
 machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
-imagename=${3:-kali-linux-$1-usbarmory-mk2}
+imagename=${3:-kali-linux-$1-odroid-w}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
@@ -26,14 +29,14 @@ free_space="300"
 bootsize="128"
 # Select compression, xz or none
 compress="xz"
-# Choose filesystem format to format ( ext3 or ext4 )
+# Choose filesystem format to format (ext3 or ext4)
 fstype="ext3"
 # If you have your own preferred mirrors, set them here.
 mirror=${mirror:-"http://http.kali.org/kali"}
 # Gitlab url Kali repository
 kaligit="https://gitlab.com/kalilinux"
 # Github raw url
-githubraw="$githubraw"
+githubraw="https://raw.githubusercontent.com"
 
 # Check EUID=0 you can run any binary as root.
 if [[ $EUID -ne 0 ]]; then
@@ -58,7 +61,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/usbarmory-mk2-"$1"
+basedir=${current_dir}/odroidw-"$1"
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
@@ -77,12 +80,19 @@ fi
 components="main,contrib,non-free"
 arm="kali-linux-arm ntpdate"
 base="apt-transport-https apt-utils bash-completion console-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree"
-#desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
-tools="aircrack-ng cewl crunch dnsrecon dnsutils ethtool exploitdb hydra john libnfc-bin medusa metasploit-framework mfoc ncrack nmap passing-the-hash proxychains recon-ng sqlmap tcpdump theharvester tor tshark usbutils whois windows-binaries winexe wpscan"
-services="apache2 atftpd haveged isc-dhcp-server openssh-server openvpn tightvncserver"
-extras="alsa-utils bc bison bluez bluez-firmware cryptsetup kali-linux-core libnss-systemd libssl-dev lvm2 wpasupplicant"
+desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
+tools="kali-linux-default"
+services="apache2 atftpd"
+extras="alsa-utils bc bison bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
 
 packages="${arm} ${base} ${services}"
+
+# Check to ensure that the architecture is set to ARMEL since the ODROID-W is the
+# only board that is armel.
+if [[ ${architecture} != "armel" ]] ; then
+    echo "The ODROID-W cannot run Debian armhf binaries"
+    exit 0
+fi
 
 # Automatic configuration to use an http proxy, such as apt-cacher-ng.
 # You can turn off automatic settings by uncommenting apt_cacher=off.
@@ -195,7 +205,7 @@ if [ -n "$proxy_url" ]; then
 fi
 
 # Third stage
-cat << EOF >  ${work_dir}/third-stage
+cat << EOF > ${work_dir}/third-stage
 #!/bin/bash -e
 export DEBIAN_FRONTEND=noninteractive
 
@@ -225,28 +235,61 @@ eatmydata apt-get install -y \$aptops ${packages} || eatmydata apt-get --yes --f
 eatmydata apt-get install -y \$aptops ${packages} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
+eatmydata apt-get install -y \$aptops --autoremove systemd-timesyncd || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get dist-upgrade -y \$aptops
 
 eatmydata apt-get -y --allow-change-held-packages --purge autoremove
 
-# Linux console/Keyboard configuration
+# Linux console/keyboard configuration
 echo 'console-common console-data/keymap/policy select Select keymap from full list' | debconf-set-selections
 echo 'console-common console-data/keymap/full select en-latin1-nodeadkeys' | debconf-set-selections
 
 # Copy all services
-install -m644 /bsp/services/all/*.service /etc/systemd/system/
+cp -p /bsp/services/all/*.service /etc/systemd/system/
+cp -p /bsp/services/rpi/*.service /etc/systemd/system/
+
+# Re4son's rpi-tft configurator
+wget -q ${githubraw}/Re4son/RPi-Tweaks/master/kalipi-tft-config/kalipi-tft-config -O /usr/bin/kalipi-tft-config
+chmod 755 /usr/bin/kalipi-tft-config
+
+# Script mode wlan monitor START/STOP
+install -m755 /bsp/scripts/monstart /usr/bin/
+install -m755 /bsp/scripts/monstop /usr/bin/
+
+# Install the kernel packages
+echo "deb http://http.re4son-kernel.com/re4son kali-pi main" > /etc/apt/sources.list.d/re4son.list
+wget -qO- https://re4son-kernel.com/keys/http/archive-key.asc | apt-key add - > /dev/null 2>&1
+eatmydata apt-get update
+eatmydata apt-get install -y \$aptops kalipi-kernel kalipi-bootloader kalipi-re4son-firmware kalipi-kernel-headers
 
 # Regenerated the shared-mime-info database on the first boot
 # since it fails to do so properly in a chroot.
 systemctl enable smi-hack
 
+# Copy script rpi-resizerootfs
+install -m755 /bsp/scripts/rpi-resizerootfs /usr/sbin/
+
+# Enable rpi-resizerootfs first boot
+systemctl enable rpi-resizerootfs
+
 # Generate SSH host keys on first run
 systemctl enable regenerate_ssh_host_keys
-# Enable sshd
-systemctl enable ssh
 
-# Enable dhcp server
-update-rc.d isc-dhcp-server enable
+# Copy in the bluetooth firmware
+install -m644 /bsp/firmware/rpi/BCM43430A1.hcd /lib/firmware/brcm/
+# Copy rule and service
+install -m644 /bsp/bluetooth/rpi/99-com.rules /etc/udev/rules.d/
+install -m644 /bsp/bluetooth/rpi/hciuart.service /etc/systemd/system/
+
+# Enable hciuart for bluetooth device
+install -m755 /bsp/bluetooth/rpi/btuart /usr/bin/
+systemctl enable hciuart
+
+# Enable copying of user wpa_supplicant.conf file
+systemctl enable copy-user-wpasupplicant
+
+# Enable... enabling ssh by putting ssh or ssh.txt file in /boot
+systemctl enable enable-ssh
 
 # Allow users to use NM over ssh
 install -m644 /bsp/polkit/10-NetworkManager.pkla /var/lib/polkit-1/localauthority/50-local.d
@@ -259,6 +302,9 @@ cp /etc/skel/.bashrc /root/.bashrc
 
 # Set a REGDOMAIN.  This needs to be done or wireless doesn't work correctly on the RPi 3B+
 sed -i -e 's/REGDOM.*/REGDOMAIN=00/g' /etc/default/crda
+
+# Enable login over serial
+echo "T0:23:respawn:/sbin/agetty -L ttyAMA0 115200 vt100" >> /etc/inittab
 
 # Try and make the console a bit nicer
 # Set the terminus font for a bit nicer display.
@@ -310,105 +356,33 @@ if [[ ! -z "${4}" || ! -z "${5}" ]]; then
   suite=${5}
 fi
 
+# Create cmdline.txt file
+cat << EOF > ${work_dir}/boot/cmdline.txt
+dwc_otg.fiq_fix_enable=2 console=ttyAMA0,115200 kgdboc=ttyAMA0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=$fstype rootwait rootflags=noload net.ifnames=0
+EOF
+
+# systemd doesn't seem to be generating the fstab properly for some people, so
+# let's create one.
+cat << EOF > ${work_dir}/etc/fstab
+# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+proc            /proc           proc    defaults          0       0
+/dev/mmcblk0p1  /boot           vfat    defaults          0       2
+EOF
+
 # Define sources.list
 cat << EOF > ${work_dir}/etc/apt/sources.list
 deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-echo "Setting up modules.conf"
-# rm the symlink if it exists, and the original files if they exist
-rm ${work_dir}/etc/modules
-rm ${work_dir}/etc/modules-load.d/modules.conf
-cat << EOF > ${work_dir}/etc/modules-load.d/modules.conf
-ledtrig_heartbeat
-ci_hdrc_imx
-g_ether
-#g_mass_storage
-#g_multi
-EOF
-
-echo "Setting up modprobe.d"
-cat << EOF > ${work_dir}/etc/modprobe.d/usbarmory.conf
-options g_ether use_eem=0 dev_addr=1a:55:89:a2:69:41 host_addr=1a:55:89:a2:69:42
-# To use either of the following, you should create the file /disk.img via dd
-# "dd if=/dev/zero of=/disk.img bs=1M count=2048" would create a 2GB disk.img file.
-#options g_mass_storage file=disk.img
-#options g_multi use_eem=0 dev_addr=1a:55:89:a2:69:41 host_addr=1a:55:89:a2:69:42 file=disk.img
-EOF
-
-cat << EOF > ${work_dir}/etc/network/interfaces
-auto lo
-iface lo inet loopback
-
-allow-hotplug usb0
-iface usb0 inet static
-address 10.0.0.1
-netmask 255.255.255.0
-gateway 10.0.0.2
-EOF
-
-# Debian reads the config from inside /etc/dhcp.
-cp ${work_dir}/etc/dhcp/dhcpd.conf ${work_dir}/etc/dhcp/dhcpd.conf.old
-cat << EOF > ${work_dir}/etc/dhcp/dhcpd.conf
-# Sample configuration file for ISC dhcpd for Debian
-# Original file /etc/dhcp/dhcpd.conf.old
-
-ddns-update-style none;
-
-default-lease-time 600;
-max-lease-time 7200;
-
-log-facility local7;
-
-subnet 10.0.0.0 netmask 255.255.255.0 {
-  range 10.0.0.2 10.0.0.2;
-  default-lease-time 600;
-  max-lease-time 7200;
-}
-EOF
-
-# Only listen on usb0
-sed -i 's/INTERFACES.*/INTERFACES="usb0"/g' ${work_dir}/etc/default/isc-dhcp-server
-
-# Kernel section. If you want to use a custom kernel, or configuration, replace
-# them in this section.
-git clone -b linux-4.19.y --depth 1 git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git ${work_dir}/usr/src/kernel
-cd ${work_dir}/usr/src/kernel
-git rev-parse HEAD > ${work_dir}/usr/src/kernel-at-commit
-touch .scmversion
-export ARCH=arm
-export CROSS_COMPILE=arm-linux-gnueabihf-
-#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/kali-wifi-injection-4.19.patch
-#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/0001-wireless-carl9170-Enable-sniffer-mode-promisc-flag-t.patch
-wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/usbarmory_linux-4.19.config -O .config
-wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6ul-usbarmory.dts -O arch/arm/boot/dts/imx6ul-usbarmory.dts
-wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6ull-usbarmory.dts -O arch/arm/boot/dts/imx6ull-usbarmory.dts
-wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6ulz-usbarmory.dts -O arch/arm/boot/dts/imx6ulz-usbarmory.dts
-cp ${current_dir}/kernel-configs/usbarmory-4.19.config ${work_dir}/usr/src/kernel/.config
-cp ${current_dir}/kernel-configs/usbarmory-4.19.config ${work_dir}/usr/src/usbarmory-4.19.config
-make LOADADDR=0x80000000 -j $(grep -c processor /proc/cpuinfo) uImage modules imx6ul-usbarmory.dts imx6ull-usbarmory.dts imx6ulz-usbarmory.dts
-make modules_install INSTALL_MOD_PATH=${work_dir}
-cp arch/arm/boot/zImage ${work_dir}/boot/
-cp arch/arm/boot/dts/imx53-usbarmory*.dtb ${work_dir}/boot/
-make mrproper
-# Since these aren't integrated into the kernel yet, mrproper removes them.
-cp ${current_dir}/kernel-configs/usbarmory-4.19.config ${work_dir}/usr/src/kernel/.config
-wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6ul-usbarmory.dts -O arch/arm/boot/dts/imx6ul-usbarmory.dts
-wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6ull-usbarmory.dts -O arch/arm/boot/dts/imx6ull-usbarmory.dts
-wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6ulz-usbarmory.dts -O arch/arm/boot/dts/imx6ulz-usbarmory.dts
+# Copy a default config, with everything commented out so people find it when
+# they go to add something when they are following instructions on a website.
+cp ./bsp/firmware/rpi/config.txt ${work_dir}/boot/config.txt
+# Remove repeat conditional filters [all] in config.txt
+sed -i "59,66d" ${work_dir}/boot/config.txt
 
 
-# Fix up the symlink for building external modules
-# kernver is used so we don't need to keep track of what the current compiled
-# version is
-kernver=$(ls ${work_dir}/lib/modules/)
-cd ${work_dir}/lib/modules/${kernver}
-rm build
-rm source
-ln -s /usr/src/kernel build
-ln -s /usr/src/kernel source
-cd ${current_dir}
+cd "${basedir}"
 
 # Calculate the space to create the image.
 root_size=$(du -s -B1 ${work_dir} --exclude=${work_dir}/boot | cut -f1)
@@ -419,21 +393,28 @@ raw_size=$(($((${free_space}*1024))+${root_extra}+$((${bootsize}*1024))+4096))
 echo "Creating image file ${imagename}.img"
 fallocate -l $(echo ${raw_size}Ki | numfmt --from=iec-i --to=si) ${current_dir}/${imagename}.img
 parted -s ${current_dir}/${imagename}.img mklabel msdos
-parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary ext2 5MiB 100%
+parted -s ${current_dir}/${imagename}.img mkpart primary fat32 1MiB ${bootsize}MiB
+parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype ${bootsize}MiB 100%
 
 # Set the partition variables
-loopdevice=`losetup -f --show ${current_dir}/${imagename}.img`
-device=`kpartx -va ${loopdevice} | sed 's/.*\(loop[0-9]\+\)p.*/\1/g' | head -1`
-sleep 5
-device="/dev/mapper/${device}"
-rootp=${device}p1
+loopdevice=$(losetup --show -fP "${current_dir}/${imagename}.img")
+bootp="${loopdevice}p1"
+rootp="${loopdevice}p2"
 
 # Create file systems
-mkfs.ext2 ${rootp}
+mkfs.vfat -n BOOT -F 32 -v ${bootp}
+if [[ $fstype == ext4 ]]; then
+  features="-O ^64bit,^metadata_csum"
+elif [[ $fstype == ext3 ]]; then
+  features="-O ^64bit"
+fi
+mkfs $features -t $fstype -L ROOTFS ${rootp}
 
 # Create the dirs for the partitions and mount them
-mkdir -p "${basedir}"/root
-mount ${rootp} "${basedir}"/root
+mkdir -p ${basedir}/root/
+mount ${rootp} ${basedir}/root
+mkdir -p ${basedir}/root/boot
+mount ${bootp} ${basedir}/root/boot
 
 # We do this down here to get rid of the build system's resolv.conf after running through the build.
 cat << EOF > ${work_dir}/etc/resolv.conf
@@ -449,17 +430,9 @@ rsync -HPavz -q ${work_dir}/ ${basedir}/root/
 
 # Unmount partitions
 sync
+umount ${bootp}
 umount ${rootp}
 kpartx -dv ${loopdevice}
-
-cd "${basedir}"
-wget ftp://ftp.denx.de/pub/u-boot/u-boot-2020.07.tar.bz2
-tar xvf u-boot-2020.07.tar.bz2 && cd u-boot-2020.07
-make distclean
-make usbarmory_config
-make ARCH=arm
-dd if=u-boot.imx of=${loopdevice} bs=512 seek=2 conv=fsync
-
 losetup -d ${loopdevice}
 
 # Limite use cpu function
@@ -487,7 +460,7 @@ limit_cpu (){
 if [ $compress = xz ]; then
   if [ $(arch) == 'x86_64' ]; then
     echo "Compressing ${imagename}.img"
-    [ $(nproc) \< 3 ] || cpu_cores=4 # cpu_cores = Number of cores to use
+    [ $(nproc) \< 3 ] || cpu_cores=3 # cpu_cores = Number of cores to use
     limit_cpu pixz -p ${cpu_cores:-2} ${current_dir}/${imagename}.img # -p Nº cpu cores use
     chmod 644 ${current_dir}/${imagename}.img.xz
   fi
@@ -497,5 +470,5 @@ fi
 
 # Clean up all the temporary build stuff and remove the directories.
 # Comment this out to keep things around if you want to see what may have gone wrong.
-echo "Removing build directory"
+echo "Cleaning up the temporary build files..."
 rm -rf "${basedir}"

@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# This is Kali Linux ARM image for ???TODO???
+# More information: https://www.kali.org/docs/arm/???TODO???/
+
+echo "This script is now deprecated." >&2
+sleep 5s
+
 # Uncomment to activate debug
 # debug=true
 
@@ -16,7 +22,7 @@ machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
-imagename=${3:-kali-linux-$1-luna}
+imagename=${3:-kali-linux-$1-kalitap}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
@@ -26,7 +32,7 @@ free_space="300"
 bootsize="128"
 # Select compression, xz or none
 compress="xz"
-# Choose filesystem format to format ( ext3 or ext4 )
+# Choose filesystem format to format (ext3 or ext4)
 fstype="ext3"
 # If you have your own preferred mirrors, set them here.
 mirror=${mirror:-"http://http.kali.org/kali"}
@@ -58,7 +64,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/luna-"$1"
+basedir=${current_dir}/kalitap-"$1"
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
@@ -76,8 +82,8 @@ fi
 
 components="main,contrib,non-free"
 arm="kali-linux-arm ntpdate"
-base="apt-transport-https apt-utils bash-completion console-setup dialog ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree"
-desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
+base="apt-transport-https apt-utils bash-completion console-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree"
+desktop="kali-desktop-xfce xserver-xorg-video-fbdev xfonts-terminus xinput"
 tools="kali-linux-default"
 services="apache2 atftpd"
 extras="alsa-utils bc bison bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
@@ -153,12 +159,10 @@ deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-# Set hostname
 echo "${hostname}" > ${work_dir}/etc/hostname
 
-# So X doesn't complain, we add kali to hosts
 cat << EOF > ${work_dir}/etc/hosts
-127.0.0.1       ${hostname}    localhost
+127.0.0.1       ${hostname}   localhost
 ::1             localhost ip6-localhost ip6-loopback
 fe00::0         ip6-localnet
 ff00::0         ip6-mcastprefix
@@ -166,12 +170,7 @@ ff02::1         ip6-allnodes
 ff02::2         ip6-allrouters
 EOF
 
-# Disable IPv6
-cat << EOF > ${work_dir}/etc/modprobe.d/ipv6.conf
-# Don't load ipv6 by default
-alias net-pf-10 off
-EOF
-
+mkdir -p ${work_dir}/etc/network/
 cat << EOF > ${work_dir}/etc/network/interfaces
 auto lo
 iface lo inet loopback
@@ -179,10 +178,17 @@ iface lo inet loopback
 auto eth0
 allow-hotplug eth0
 iface eth0 inet dhcp
+
+iface usb0 inet static
+    address 192.168.7.2
+    netmask 255.255.255.0
+    network 192.168.7.0
+    gateway 192.168.7.1
 EOF
 
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
+cat << EOF > ${work_dir}/etc/resolv.conf
+nameserver 8.8.8.8
+EOF
 
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
@@ -195,13 +201,13 @@ if [ -n "$proxy_url" ]; then
 fi
 
 # Third stage
-cat << EOF >  ${work_dir}/third-stage
+cat << EOF > ${work_dir}/third-stage
 #!/bin/bash -e
 export DEBIAN_FRONTEND=noninteractive
 
 eatmydata apt-get update
 
-eatmydata apt-get -y install binutils ca-certificates console-common git initramfs-tools less locales nano uboot-mkimage
+eatmydata apt-get -y install binutils ca-certificates console-common git initramfs-tools less locales nano u-boot-tools
 
 # Create kali user with kali password... but first, we need to manually make some groups because they don't yet exist...
 # This mirrors what we have on a pre-installed VM, until the script works properly to allow end users to set up their own... user.
@@ -226,15 +232,16 @@ eatmydata apt-get install -y \$aptops ${packages} || eatmydata apt-get --yes --f
 eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops --autoremove systemd-timesyncd || eatmydata apt-get --yes --fix-broken install
+eatmydata apt-get dist-upgrade -y \$aptops
 
 eatmydata apt-get -y --allow-change-held-packages --purge autoremove
 
-# Linux console/Keyboard configuration
+# Linux console/keyboard configuration
 echo 'console-common console-data/keymap/policy select Select keymap from full list' | debconf-set-selections
 echo 'console-common console-data/keymap/full select en-latin1-nodeadkeys' | debconf-set-selections
 
 # Copy all services
-cp -p /bsp/services/all/*.service /etc/systemd/system/
+install -m644 /bsp/services/all/*.service /etc/systemd/system/
 
 # Regenerated the shared-mime-info database on the first boot
 # since it fails to do so properly in a chroot.
@@ -251,14 +258,14 @@ install -m644 /bsp/polkit/10-NetworkManager.pkla /var/lib/polkit-1/localauthorit
 cd /root
 apt download -o APT::Sandbox::User=root ca-certificates 2>/dev/null
 
-# Copy over the default bashrc
-cp /etc/skel/.bashrc /root/.bashrc
+# Copy bashrc
+cp  /etc/skel/.bashrc /root/.bashrc
 
 # Set a REGDOMAIN.  This needs to be done or wireless doesn't work correctly on the RPi 3B+
 sed -i -e 's/REGDOM.*/REGDOMAIN=00/g' /etc/default/crda
 
-# Enable login over serial
-echo "T0:23:respawn:/sbin/agetty -L ttyO0 115200 vt100" >> /etc/inittab
+# Enable serial console on ttyO0
+echo 'T1:12345:respawn:/sbin/agetty 115200 ttyO0 vt100' >> /etc/inittab
 
 # Try and make the console a bit nicer
 # Set the terminus font for a bit nicer display.
@@ -324,21 +331,33 @@ deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
+# Need to patch the kernel to support newer gcc, but that'll happen after 2018.3
+cd "${basedir}"
+git clone --depth 1 https://gitlab.com/kalilinux/packages/gcc-arm-linux-gnueabihf-4-7.git gcc-arm-linux-gnueabihf-4.7
+
 # Get, compile and install kernel
-git clone --depth 1 https://github.com/steev/luna-kernel ${work_dir}/usr/src/kernel
+git clone --depth 1 https://github.com/wawtechnologies/linux-kernel-3.14.51-catchwire-kalitap.git ${work_dir}/usr/src/kernel
 cd ${work_dir}/usr/src/kernel
-patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/mac80211.patch
+git rev-parse HEAD > ${work_dir}/usr/src/kernel-at-commit
+patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/kali-wifi-injection-3.14.patch
+patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/0001-wireless-carl9170-Enable-sniffer-mode-promisc-flag-t.patch
+touch .scmversion
 export ARCH=arm
-export CROSS_COMPILE=arm-linux-gnueabihf-
-cp ${current_dir}/kernel-configs/luna.config .config
+export CROSS_COMPILE="${basedir}"/gcc-arm-linux-gnueabihf-4.7/bin/arm-linux-gnueabihf-
+cp ${current_dir}/kernel-configs/kalitap.config .config
+cp ${current_dir}/kernel-configs/kalitap.config ${work_dir}/usr/src/kalitap.config
 make -j $(grep -c processor /proc/cpuinfo)
+make catchwire.dtb catchwire-demac.dtb catchwire-switch.dtb
+make INSTALL_MOD_PATH=${work_dir}/ modules_install
 cp arch/arm/boot/zImage ${work_dir}/boot/
-cp arch/arm/boot/dts/am335x-*luna*.dtb ${work_dir}/boot/
+cp arch/arm/boot/dts/catchwire*.dtb ${work_dir}/boot/
+make mrproper
+cp ../kalitap.config .config
 cd "${basedir}"
 
 # systemd doesn't seem to be generating the fstab properly for some people, so
-# let's create one. We add the root partition below via UUID which we won't
-# know until after the image is created and partitioned.
+# let's create one. The rootfs partition is added below via UUID after the image
+# is created since we won't know the UUID until then.
 cat << EOF > ${work_dir}/etc/fstab
 # <file system> <mount point>   <type>  <options>       <dump>  <pass>
 proc            /proc           proc    defaults          0       0
@@ -356,24 +375,45 @@ ln -s /usr/src/kernel build
 ln -s /usr/src/kernel source
 cd "${basedir}"
 
-#u-boot LUNA specific overrides:
+git clone https://github.com/wawtechnologies/utilities-catchwire-kalitap "${basedir}"/utilities
+cd "${basedir}"/utilities
+install -m755 cpswutils/cpswaleget ${work_dir}/usr/sbin
+install -m755 cpswutils/cpswaleset ${work_dir}/usr/sbin
+install -m755 udp0srv/udp0srv ${work_dir}/usr/sbin
+cd "${basedir}"
+
+#u-boot kalitap specific overrides:
 cat << EOF > ${work_dir}/boot/uEnv.txt
-fdtfile=am335x-luna.dtb
+optargs="consoleblank=0 mem=1G rootwait fixrtc net.ifnames=0 rootwait"
 kernel_file=zImage
-initrd_file=uInitrd
-
-loadzimage=load mmc \${mmcdev}:\${mmcpart} \${loadaddr} \${kernel_file}
-loadinitrd=load mmc \${mmcdev}:\${mmcpart} 0x81000000 \${initrd_file}; setenv initrd_size \${filesize}
-loadfdt=load mmc \${mmcdev}:\${mmcpart} \${fdtaddr} /dtbs/\${fdtfile}
-
+initrd_file=initrd.img
+loadaddr=0x82000000
+initrd_addr=0x88080000
+fdtaddr=0x88000000
+fdtfile=catchwire.dtb
+initrd_high=0xffffffff
+fdt_high=0xffffffff
+loadimage=load mmc \${mmcdev}:\${mmcpart} \${loadaddr} \${kernel_file}
+loadinitrd=load mmc \${mmcdev}:\${mmcpart} \${initrd_addr} \${initrd_file}; setenv initrd_size \${filesize}
+loadfdt=load mmc \${mmcdev}:\${mmcpart} \${fdtaddr} \${fdtfile}
 console=ttyO0,115200n8
-mmcroot=/dev/mmcblk0p2 ro
-mmcrootfstype=$fstype rootwait fixrtc net.ifnames=0
+mmcroot=/dev/mmcblk0p2
+mmcrootfstype=$fstype
 mmcargs=setenv bootargs console=\${console} root=\${mmcroot} rootfstype=\${mmcrootfstype} \${optargs}
-
-#zImage:
-uenvcmd=run loadzimage; run loadfdt; run mmcargs; bootz \${loadaddr} - \${fdtaddr}
+uenvcmd=run loadimage; run loadfdt; run mmcargs; bootz \${loadaddr} - \${fdtaddr}
 EOF
+
+# Need MLO/u-boot on the sdcard.
+git clone https://github.com/wawtechnologies/u-boot-2014.04-catchwire-kalitap.git "${basedir}"/u-boot
+cd "${basedir}"/u-boot
+make ARCH=arm distclean
+make ARCH=arm catchwire_config
+make ARCH=arm
+
+cp MLO ${work_dir}/boot/
+cp u-boot.img ${work_dir}/boot/
+
+cd "${basedir}"
 
 # Calculate the space to create the image.
 root_size=$(du -s -B1 ${work_dir} --exclude=${work_dir}/boot | cut -f1)
@@ -386,6 +426,7 @@ fallocate -l $(echo ${raw_size}Ki | numfmt --from=iec-i --to=si) ${current_dir}/
 parted -s ${current_dir}/${imagename}.img mklabel msdos
 parted -s ${current_dir}/${imagename}.img mkpart primary fat32 1MiB ${bootsize}MiB
 parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype ${bootsize}MiB 100%
+parted -s ${current_dir}/${imagename}.img set 1 boot on
 
 # Set the partition variables
 loopdevice=`losetup -f --show ${current_dir}/${imagename}.img`
@@ -407,7 +448,7 @@ mkfs $features -t $fstype -L ROOTFS ${rootp}
 # Create the dirs for the partitions and mount them
 mkdir -p "${basedir}"/root
 mount ${rootp} "${basedir}"/root
-mkdir -p $"${basedir}"/root/boot
+mkdir -p "${basedir}"/root/boot
 mount ${bootp} "${basedir}"/root/boot
 
 # We do this down here to get rid of the build system's resolv.conf after running through the build.

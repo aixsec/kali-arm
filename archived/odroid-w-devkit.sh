@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 
-# This is for the Cubox-i (Freescale based) NOT the Marvell based original.
+# This is Kali Linux ARM image for ???TODO???
+# More information: https://www.kali.org/docs/arm/???TODO???/
 
 # Uncomment to activate debug
 # debug=true
@@ -12,13 +13,13 @@ if [ "$debug" = true ]; then
 fi
 
 # Architecture
-architecture=${architecture:-"armhf"}
+architecture=${architecture:-"armel"}
 # Generate a random machine name to be used.
 machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
-imagename=${3:-kali-linux-$1-cuboxi}
+imagename=${3:-kali-linux-$1-odroid-w-devkit}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
@@ -28,7 +29,7 @@ free_space="300"
 bootsize="128"
 # Select compression, xz or none
 compress="xz"
-# Choose filesystem format to format ( ext3 or ext4 )
+# Choose filesystem format to format (ext3 or ext4)
 fstype="ext3"
 # If you have your own preferred mirrors, set them here.
 mirror=${mirror:-"http://http.kali.org/kali"}
@@ -60,7 +61,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/cuboxi-"$1"
+basedir=${current_dir}/owdk-"$1"
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
@@ -77,14 +78,22 @@ else
 fi
 
 components="main,contrib,non-free"
-arm="kali-linux-arm ntpdate"
-base="apt-transport-https apt-utils bash-completion console-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db linux-image-armmp mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux u-boot-menu u-boot-imx unrar usbutils vim wget whiptail zerofree"
-desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
-tools="kali-linux-default"
-services="apache2 atftpd"
-extras="alsa-utils bc bison bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
+arm="abootimg cgpt fake-hwclock ntpdate u-boot-tools vboot-utils vboot-kernel-utils"
+base="apt-transport-https apt-utils e2fsprogs ifupdown initramfs-tools parted usbutils firmware-linux firmware-atheros firmware-libertas firmware-realtek kali-defaults kali-menu sudo"
+desktop="kali-menu fonts-croscore fonts-crosextra-caladea fonts-crosextra-carlito kali-desktop-xfce kali-root-login lightdm network-manager network-manager-gnome xfce4 xserver-xorg-video-fbdev"
+tools="aircrack-ng ethtool hydra john libnfc-bin mfoc nmap passing-the-hash sqlmap usbutils winexe wireshark"
+services="apache2 openssh-server"
+extras="firefox-esr xfce4-terminal wpasupplicant"
+size=14000 # Size of image in megabytes
 
 packages="${arm} ${base} ${services}"
+
+# Check to ensure that the architecture is set to ARMEL since the ODWK is the
+# only board that is armel.
+if [[ ${architecture} != "armel" ]] ; then
+    echo "The ODROID-W cannot run the Debian armhf binaries"
+    exit 0
+fi
 
 # Automatic configuration to use an http proxy, such as apt-cacher-ng.
 # You can turn off automatic settings by uncommenting apt_cacher=off.
@@ -197,13 +206,13 @@ if [ -n "$proxy_url" ]; then
 fi
 
 # Third stage
-cat << EOF >  ${work_dir}/third-stage
+cat << EOF > ${work_dir}/third-stage
 #!/bin/bash -e
 export DEBIAN_FRONTEND=noninteractive
 
 eatmydata apt-get update
 
-eatmydata apt-get -y install binutils ca-certificates console-common cryptsetup-bin git initramfs-tools less locales nano u-boot-tools
+eatmydata apt-get -y install binutils ca-certificates console-common git initramfs-tools less locales nano u-boot-tools
 
 # Create kali user with kali password... but first, we need to manually make some groups because they don't yet exist...
 # This mirrors what we have on a pre-installed VM, until the script works properly to allow end users to set up their own... user.
@@ -227,26 +236,60 @@ eatmydata apt-get install -y \$aptops ${packages} || eatmydata apt-get --yes --f
 eatmydata apt-get install -y \$aptops ${packages} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
-eatmydata apt-get install -y \$aptops --autoremove systemd-timesyncd || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get dist-upgrade -y \$aptops
 
 eatmydata apt-get -y --allow-change-held-packages --purge autoremove
 
-# Linux console/Keyboard configuration
+# Linux console/keyboard configuration
 echo 'console-common console-data/keymap/policy select Select keymap from full list' | debconf-set-selections
 echo 'console-common console-data/keymap/full select en-latin1-nodeadkeys' | debconf-set-selections
 
 # Copy all services
-install -m644 /bsp/services/all/*.service /etc/systemd/system/
+cp -p /bsp/services/all/*.service /etc/systemd/system/
+cp -p /bsp/services/rpi/*.service /etc/systemd/system/
+
+# Re4son's rpi-tft configurator
+wget -q ${githubraw}/Re4son/RPi-Tweaks/master/kalipi-tft-config/kalipi-tft-config -O /usr/bin/kalipi-tft-config
+chmod 755 /usr/bin/kalipi-tft-config
+
+# Script mode wlan monitor START/STOP
+install -m755 /bsp/scripts/monstart /usr/bin/
+install -m755 /bsp/scripts/monstop /usr/bin/
+
+# Install the kernel packages
+echo "deb http://http.re4son-kernel.com/re4son kali-pi main" > /etc/apt/sources.list.d/re4son.list
+wget -qO- https://re4son-kernel.com/keys/http/archive-key.asc | apt-key add - > /dev/null 2>&1
+eatmydata apt-get update
+eatmydata apt-get install -y \$aptops kalipi-kernel kalipi-bootloader kalipi-re4son-firmware kalipi-kernel-headers
 
 # Regenerated the shared-mime-info database on the first boot
 # since it fails to do so properly in a chroot.
 systemctl enable smi-hack
 
+# Copy script rpi-resizerootfs
+install -m755 /bsp/scripts/rpi-resizerootfs /usr/sbin/
+
+# Enable rpi-resizerootfs first boot
+systemctl enable rpi-resizerootfs
+
 # Generate SSH host keys on first run
 systemctl enable regenerate_ssh_host_keys
-# Enable sshd
-systemctl enable ssh
+
+# Copy in the bluetooth firmware
+install -m644 /bsp/firmware/rpi/BCM43430A1.hcd /lib/firmware/brcm/
+# Copy rule and service
+install -m644 /bsp/bluetooth/rpi/99-com.rules /etc/udev/rules.d/
+install -m644 /bsp/bluetooth/rpi/hciuart.service /etc/systemd/system/
+
+# Enable hciuart for bluetooth device
+install -m755 /bsp/bluetooth/rpi/btuart /usr/bin/
+systemctl enable hciuart
+
+# Enable copying of user wpa_supplicant.conf file
+systemctl enable copy-user-wpasupplicant
+
+# Enable... enabling ssh by putting ssh or ssh.txt file in /boot
+systemctl enable enable-ssh
 
 # Allow users to use NM over ssh
 install -m644 /bsp/polkit/10-NetworkManager.pkla /var/lib/polkit-1/localauthority/50-local.d
@@ -254,14 +297,14 @@ install -m644 /bsp/polkit/10-NetworkManager.pkla /var/lib/polkit-1/localauthorit
 cd /root
 apt download -o APT::Sandbox::User=root ca-certificates 2>/dev/null
 
-# Copy bashrc
-cp  /etc/skel/.bashrc /root/.bashrc
+# Copy over the default bashrc
+cp /etc/skel/.bashrc /root/.bashrc
 
 # Set a REGDOMAIN.  This needs to be done or wireless doesn't work correctly on the RPi 3B+
 sed -i -e 's/REGDOM.*/REGDOMAIN=00/g' /etc/default/crda
 
-# Enable serial console
-echo 'T1:12345:respawn:/sbin/agetty 115200 ttymxc0 vt100' >> /etc/inittab
+# Enable login over serial
+echo "T0:23:respawn:/sbin/agetty -L ttyAMA0 115200 vt100" >> /etc/inittab
 
 # Try and make the console a bit nicer
 # Set the terminus font for a bit nicer display.
@@ -270,12 +313,6 @@ sed -i -e 's/FONTSIZE=.*/FONTSIZE="6x12"/' /etc/default/console-setup
 
 # Fix startup time from 5 minutes to 15 secs on raise interface wlan0
 sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=15/g' "/usr/lib/systemd/system/networking.service"
-
-# We replace the u-boot menu defaults here so we can make sure the build system doesn't poison it.
-# We use _EOF_ so that the third-stage script doesn't end prematurely.
-cat << '_EOF_' > /etc/default/u-boot
-U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 root=/dev/mmcblk0p1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0"
-_EOF_
 
 rm -f /usr/bin/dpkg
 EOF
@@ -325,16 +362,50 @@ deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-# For some reason the brcm firmware doesn't work properly in linux-firmware git
-# so we grab the ones from OpenELEC
-cd ${basedir}
-git clone https://github.com/OpenELEC/wlan-firmware
-cd wlan-firmware
-rm -rf ${work_dir}/lib/firmware/brcm
-cp -a firmware/brcm ${work_dir}/lib/firmware/
+# systemd doesn't seem to be generating the fstab properly for some people, so
+# let's create one. Root partition is added below after the image file is created
+# because we add it via UUID.
+cat << EOF > ${work_dir}/etc/fstab
+# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+proc            /proc           proc    defaults          0       0
+/dev/mmcblk0p1  /boot           vfat    defaults          0       2
+EOF
 
-# Ensure we don't have root=/dev/sda3 in the extlinux.conf which comes from running u-boot-menu in a cross chroot.
-sed -i -e 's/append.*/append root=\/dev\/mmcblk1p1 rootfstype=$fstype video=mxcfb0:dev=hdmi,1920x1080M@60,if=RGB24,bpp=32 console=ttymxc0,115200n8 console=tty1 consoleblank=0 rw rootwait/g' ${work_dir}/boot/extlinux/extlinux.conf
+# Create cmdline.txt file
+cat << EOF > ${work_dir}/boot/cmdline.txt
+dwc_otg.lpm_enable=0 console=ttyAMA0,115200 kgdboc=ttyAMA0,115200 console=tty1 elevator=deadline root=/dev/mmcblk0p2 rootfstype=$fstype rootwait fbcon=map:10 net.ifnames=0 rw
+EOF
+
+# Copy a default config, with everything commented out so people find it when
+# they go to add something when they are following instructions on a website.
+cp ./bsp/firmware/rpi/config.txt ${work_dir}/boot/config.txt
+# Remove repeat conditional filters [all] in config.txt
+sed -i "59,66d" ${work_dir}/boot/config.txt
+
+# Add needed bit for the lcd of the devkit.
+cat << EOF >> ${work_dir}/boot/config.txt
+
+# Use fbtft_device instead of a DT overlay
+dtparam=spi=on
+EOF
+
+# Create /etc/modules based on ODROID-W
+cat << EOF > ${work_dir}/etc/modules
+# /etc/modules: kernel modules to load at boot time.
+#
+# This file contains the names of kernel modules that should be loaded
+# at boot time, one per line. Lines beginning with "#" are ignored.
+# Parameters can be specified after the module name.
+
+snd-bcm2835
+spi_bcm2708
+fbtft_device name=adafruit22a rotate=90
+EOF
+
+mkdir -p ${work_dir}/etc/modprobe.d/
+cat << EOF > ${work_dir}/etc/modprobe.d/fbtft_device.conf
+options fbtft_device name=adafruit22a rotate=90
+EOF
 
 # Calculate the space to create the image.
 root_size=$(du -s -B1 ${work_dir} --exclude=${work_dir}/boot | cut -f1)
@@ -345,15 +416,16 @@ raw_size=$(($((${free_space}*1024))+${root_extra}+$((${bootsize}*1024))+4096))
 echo "Creating image file ${imagename}.img"
 fallocate -l $(echo ${raw_size}Ki | numfmt --from=iec-i --to=si) ${current_dir}/${imagename}.img
 parted -s ${current_dir}/${imagename}.img mklabel msdos
-parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype 1MiB 100%
+parted -s ${current_dir}/${imagename}.img mkpart primary fat32 1MiB ${bootsize}MiB
+parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype ${bootsize}MiB 100%
 
 # Set the partition variables
-loopdevice=`losetup -f --show ${current_dir}/${imagename}.img`
-device=`kpartx -va ${loopdevice} | sed 's/.*\(loop[0-9]\+\)p.*/\1/g' | head -1`
-sleep 5
-device="/dev/mapper/${device}"
-rootp=${device}p1
+loopdevice=$(losetup --show -fP "${current_dir}/${imagename}.img")
+bootp="${loopdevice}p1"
+rootp="${loopdevice}p2"
 
+# Create file systems
+mkfs.vfat -n BOOT -F 32 -v ${bootp}
 if [[ $fstype == ext4 ]]; then
   features="-O ^64bit,^metadata_csum"
 elif [[ $fstype == ext3 ]]; then
@@ -362,8 +434,10 @@ fi
 mkfs $features -t $fstype -L ROOTFS ${rootp}
 
 # Create the dirs for the partitions and mount them
-mkdir -p "${basedir}"/root
-mount ${rootp} "${basedir}"/root
+mkdir -p ${basedir}/root/
+mount ${rootp} ${basedir}/root
+mkdir -p ${basedir}/root/boot
+mount ${bootp} ${basedir}/root/boot
 
 # We do this down here to get rid of the build system's resolv.conf after running through the build.
 cat << EOF > ${work_dir}/etc/resolv.conf
@@ -377,29 +451,12 @@ echo "UUID=$UUID /               $fstype    errors=remount-ro 0       1" >> ${wo
 echo "Rsyncing rootfs into image file"
 rsync -HPavz -q ${work_dir}/ ${basedir}/root/
 
-dd conv=fsync,notrunc if=${work_dir}/usr/lib/u-boot/mx6cuboxi/SPL of=${loopdevice} bs=1k seek=1
-dd conv=fsync,notrunc if=${work_dir}/usr/lib/u-boot/mx6cuboxi/u-boot.img of=${loopdevice} bs=1k seek=69
-
 # Unmount partitions
 sync
+umount ${bootp}
 umount ${rootp}
-
-# We need an older cross compiler for compiling u-boot so check out the 4.7
-# cross compiler.
-#git clone https://github.com/offensive-security/gcc-arm-linux-gnueabihf-4.7
-
-#git clone https://github.com/SolidRun/u-boot-imx6.git
-#cd "${basedir}"/u-boot-imx6
-#make CROSS_COMPILE="${basedir}"/gcc-arm-linux-gnueabihf-4.7/bin/arm-linux-gnueabihf- mx6_cubox-i_config
-#make CROSS_COMPILE="${basedir}"/gcc-arm-linux-gnueabihf-4.7/bin/arm-linux-gnueabihf-
-
-#dd if=SPL of=${loopdevice} bs=1K seek=1
-#dd if=u-boot.img of=${loopdevice} bs=1K seek=42
-
 kpartx -dv ${loopdevice}
 losetup -d ${loopdevice}
-
-cd ${current_dir}
 
 # Limite use cpu function
 limit_cpu (){
@@ -436,5 +493,5 @@ fi
 
 # Clean up all the temporary build stuff and remove the directories.
 # Comment this out to keep things around if you want to see what may have gone wrong.
-echo "Removing temporary build files"
+echo "Cleaning up the temporary build files..."
 rm -rf "${basedir}"

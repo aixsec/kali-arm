@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# This is Kali Linux ARM image for Utilite Pro
-# More information: https://www.kali.org/docs/arm/utilite-pro/
+# This is Kali Linux ARM image for CuBox-i4Pro
+# More information: https://www.kali.org/docs/arm/cubox-i4pro/
 
 # Uncomment to activate debug
 # debug=true
@@ -19,7 +19,7 @@ machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end
-imagename=${3:-kali-linux-$1-utilite-pro}
+imagename=${3:-kali-linux-$1-cubox-i4pro}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
@@ -63,7 +63,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/utilite-pro-"$1"
+basedir=${current_dir}/cubox-i4pro-"$1"
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
@@ -85,7 +85,7 @@ components="main,contrib,non-free"
 # Every ARM device has this
 arm="kali-linux-arm ntpdate"
 # Required for the board
-base="apt-transport-https apt-utils bash-completion console-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree"
+base="apt-transport-https apt-utils bash-completion console-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree u-boot-menu linux-image-armmp u-boot-imx"
 # GUI
 desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
 # Kali Tools
@@ -220,7 +220,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 eatmydata apt-get update
 
-eatmydata apt-get -y install binutils ca-certificates console-common git less locales nano initramfs-tools u-boot-tools
+eatmydata apt-get -y install binutils ca-certificates console-common git less locales nano initramfs-tools u-boot-tools cryptsetup-bin
 
 # Create kali user with kali password... but first, we need to manually make some groups because they don't yet exist..
 # This mirrors what we have on a pre-installed VM, until the script works properly to allow end users to set up their own... user
@@ -280,8 +280,8 @@ cp /etc/skel/.bashrc /root/.bashrc
 # Set a REGDOMAIN. This needs to be done or wireless may not work correctly
 sed -i -e 's/REGDOM.*/REGDOMAIN=00/g' /etc/default/crda
 
-# Enable serial console access
-echo "T1:23:respawn:/sbin/agetty -L ttymxc3 115200 vt100" >> /etc/inittab
+# Enable serial console
+echo 'T1:12345:respawn:/sbin/agetty 115200 ttymxc0 vt100' >> /etc/inittab
 
 # Try and make the console a bit nicer
 # Set the terminus font for a bit nicer display
@@ -290,6 +290,12 @@ sed -i -e 's/FONTSIZE=.*/FONTSIZE="6x12"/g' /etc/default/console-setup
 
 # Fix startup time from 5 minutes to 15 secs on raise interface wlan0
 sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=15/g' "/usr/lib/systemd/system/networking.service"
+
+# We replace the u-boot menu defaults here so we can make sure the build system doesn't poison it
+# We use _EOF_ so that the third-stage script doesn't end prematurely
+cat << '_EOF_' > /etc/default/u-boot
+U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 root=/dev/mmcblk0p1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0"
+_EOF_
 
 rm -f /usr/bin/dpkg
 EOF
@@ -333,99 +339,22 @@ if [[ ! -z "${4}" || ! -z "${5}" ]]; then
   suite=${5}
 fi
 
-cat << EOF >> ${work_dir}/etc/udev/links.conf
-M   ttymxc3 c   5 1
-EOF
-
-cat << EOF >> ${work_dir}/etc/securetty
-ttymxc3
-EOF
-
-# Mirror replacement
-if [[ ! -z "${@:5}" || "$suite" != "kali-rolling" ]]; then
-  mirror=${@:5}
-  [ ! -z "${@:5}" ] || mirror="http://http.kali.org/kali"
-  [ "$suite" != "kali-rolling" ] && suite=kali-rolling
-fi
-
 # Define sources.list
 cat << EOF > "${work_dir}"/etc/apt/sources.list
 deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-# systemd doesn't seem to be generating the fstab properly for some people, so
-# let's create one. We leave the root partition off and add it below after
-# we create the partition in the image so we can use the UUID
-cat << EOF > "${work_dir}"/etc/fstab
-# <file system> <mount point>   <type>  <options>       <dump>  <pass>
-proc            /proc           proc    defaults          0       0
-/dev/mmcblk0p1  /boot           vfat    defaults          0       2
-EOF
-
+# For some reason the brcm firmware doesn't work properly in linux-firmware git
+# so we grab the ones from OpenELEC
 cd "${basedir}"
-# Clone a cross compiler to use instead of the Kali one due to kernel age
-git clone --depth 1 https://gitlab.com/kalilinux/packages/gcc-arm-linux-gnueabihf-4-7.git gcc-arm-linux-gnueabihf-4.7
+git clone --depth 1 https://github.com/OpenELEC/wlan-firmware
+cd wlan-firmware
+rm -rf ${work_dir}/lib/firmware/brcm
+cp -a firmware/brcm ${work_dir}/lib/firmware/
 
-# Kernel section. If you want to use a custom kernel, or configuration, replace
-# them in this section
-git clone --depth 1 https://github.com/utilite-computer/linux-kernel ${work_dir}/usr/src/kernel --branch utilite/devel
-cd ${work_dir}/usr/src/kernel
-git rev-parse HEAD > ${work_dir}/usr/src/kernel-at-commit
-patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/mac80211.patch
-# Needed for issues with hdmi being inited already in u-boot
-patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/f922b0d.patch
-patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/0001-wireless-carl9170-Enable-sniffer-mode-promisc-flag-t.patch
-# This patch is necessary for older revisions of the Utilite so leave the patch
-# and comment in the repo to know why this is here. Should be fixed by a u-boot
-# upgrade but CompuLab haven't released it yet, so leave it here for now
-#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/31727b0.patch
-cp "${current_dir}"/kernel-configs/utilite-3.10.config .config
-cp "${current_dir}"/kernel-configs/utilite-3.10.config ${work_dir}/usr/src/utilite-3.10.config
-touch .scmversion
-export ARCH=arm
-export CROSS_COMPILE="${basedir}"/gcc-arm-linux-gnueabihf-4.7/bin/arm-linux-gnueabihf-
-make -j $(grep -c processor /proc/cpuinfo)
-make modules_install INSTALL_MOD_PATH=${work_dir}
-cp arch/arm/boot/zImage ${work_dir}/boot/zImage-cm-fx6
-cp arch/arm/boot/dts/imx6q-sbc-fx6m.dtb ${work_dir}/boot/imx6q-sbc-fx6m.dtb
-make mrproper
-cp ../utilite-3.10.config .config
-cd "${basedir}"
-
-# Fix up the symlink for building external modules
-# kernver is used so we don't need to keep track of what the current compiled
-# version is
-kernver=$(ls ${work_dir}/lib/modules/)
-cd ${work_dir}/lib/modules/${kernver}
-rm build
-rm source
-ln -s /usr/src/kernel build
-ln -s /usr/src/kernel source
-cd "${basedir}"
-
-# Create a file to set up our u-boot environment
-cat << EOF > "${work_dir}"/boot/boot.txt
-setenv mmcdev 2
-setenv bootargs 'earlyprintk console=ttymxc3,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=$fstype rw rootwait net.ifnames=0'
-setenv loadaddr  0x10800000
-setenv fdtaddr   0x15000000
-setenv bootm_low 0x15000000
-setenv zimage zImage-cm-fx6
-setenv dtb imx6q-sbc-fx6m.dtb
-#setenv kernel uImage-cm-fx6
-
-load mmc \${mmcdev}:1 \${loadaddr} \${zimage}
-load mmc \${mmcdev}:1 \${fdtaddr} \${dtb}
-bootz \${loadaddr} - \${fdtaddr}
-#load mmc \${mmcdev}:1 \${loadaddr} \${kernel}
-#bootm \${loadaddr}
-EOF
-
-# And generate the boot.scr
-mkimage -A arm -T script -C none -d ${work_dir}/boot/boot.txt ${work_dir}/boot/boot.scr
-
-cd "${basedir}"
+# Ensure we don't have root=/dev/sda3 in the extlinux.conf which comes from running u-boot-menu in a cross chroot
+sed -i -e 's/append.*/append root=\/dev\/mmcblk1p1 rootfstype=$fstype video=mxcfb0:dev=hdmi,1920x1080M@60,if=RGB24,bpp=32 console=ttymxc0,115200n8 console=tty1 consoleblank=0 rw rootwait/g' ${work_dir}/boot/extlinux/extlinux.conf
 
 cd "${current_dir}"
 
@@ -442,21 +371,16 @@ echo "Creating image file ${imagename}.img"
 fallocate -l $(echo ${raw_size}Ki | numfmt --from=iec-i --to=si) ${current_dir}/${imagename}.img
 echo "Partitioning ${imagename}.img"
 parted -s ${current_dir}/${imagename}.img mklabel msdos
-parted -s ${current_dir}/${imagename}.img mkpart primary fat32 1MiB ${bootsize}MiB
-parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype ${bootsize}MiB 100%
+parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype 1MiB 100%
 
 # Set the partition variables
 loopdevice=$(losetup --show -fP "${current_dir}/${imagename}.img")
 device=`kpartx -va ${loopdevice} | sed 's/.*\(loop[0-9]\+\)p.*/\1/g' | head -1`
 sleep 5
 device="/dev/mapper/${device}"
-bootp=${device}p1
-rootp=${device}p2
+rootp=${device}p1
 
 # Create file systems
-mkfs.vfat -n BOOT ${bootp}
-# The utilite uses an older kernel, and newer mkfs tools add extras to ext3, so
-# we disable them otherwise there will be a kernel panic at boot
 if [[ "$fstype" == "ext4" ]]; then
   features="^64bit,^metadata_csum"
 elif [[ "$fstype" == "ext3" ]]; then
@@ -472,13 +396,6 @@ EOF
 # Create the dirs for the partitions and mount them
 mkdir -p "${basedir}"/root/
 mount "${rootp}" "${basedir}"/root
-mkdir -p "${basedir}"/root/boot
-mount ${bootp} "${basedir}"/root/boot
-
-# We do this down here to get rid of the build system's resolv.conf after running through the build
-cat << EOF > "${work_dir}"/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
 
 # Create an fstab so that we don't mount / read-only
 UUID=$(blkid -s UUID -o value ${rootp})
@@ -487,13 +404,27 @@ echo "UUID=$UUID /               $fstype    errors=remount-ro 0       1" >> ${wo
 echo "Rsyncing rootfs into image file"
 rsync -HPavz -q "${work_dir}"/boot "${basedir}"/root/
 
+dd conv=fsync,notrunc if=${work_dir}/usr/lib/u-boot/mx6cuboxi/SPL of=${loopdevice} bs=1k seek=1
+dd conv=fsync,notrunc if=${work_dir}/usr/lib/u-boot/mx6cuboxi/u-boot.img of=${loopdevice} bs=1k seek=69
+
 # Start to unmount partition(s)
 sync; sync
 # sleep for 10 seconds, to let the cache settle after sync
 sleep 10
 # Unmount filesystem
-umount -l "${bootp}"
 umount -l "${rootp}"
+
+# We need an older cross compiler for compiling u-boot so check out the 4.7
+# cross compiler
+#git clone --depth 1 https://github.com/offensive-security/gcc-arm-linux-gnueabihf-4.7
+
+#git clone --depth 1 https://github.com/SolidRun/u-boot-imx6.git
+#cd "${basedir}"/u-boot-imx6
+#make CROSS_COMPILE="${basedir}"/gcc-arm-linux-gnueabihf-4.7/bin/arm-linux-gnueabihf- mx6_cubox-i_config
+#make CROSS_COMPILE="${basedir}"/gcc-arm-linux-gnueabihf-4.7/bin/arm-linux-gnueabihf-
+
+#dd if=SPL of=${loopdevice} bs=1K seek=1
+#dd if=u-boot.img of=${loopdevice} bs=1K seek=42
 
 kpartx -dv ${loopdevice}
 
