@@ -222,17 +222,32 @@ def generate_manifest(data):
 
                                     device_arch = []
 
-                                    if "raspberry-pi5" in image.get("image", default):
+                                    # Always use the board entry the image is part of
+                                    board_name = board.get("board", "")
+                                    arch = "64bit" if "arm64" in image.get("architecture", "") else "32bit"
+
+                                    pi_map = {
+                                        "raspberry-pi-5": "pi5",
+                                        "raspberry-pi-4": "pi4",
+                                        "raspberry-pi-400": "pi4",
+                                        "raspberry-pi-3": "pi3",
+                                        "raspberry-pi-2": "pi2",
+                                        "raspberry-pi1": "pi1",
+                                        "raspberry-pi-zero-2-w": "pi3",
+                                        "raspberry-pi-zero-w": "pi1",
+                                    }
+
+
+                                    slug_base = pi_map.get(board_name, "pi4")
+                                    device_arch.append(f"{slug_base}-{arch}")
+
+                                    if "5" in image.get("name", "") or "5" in board_name:
                                         device_arch.append(f"pi5-{arch}")
-                                    elif "raspberry-pi1" in image.get("image", default):
-                                        device_arch.append(f"pi1-{arch}")
-                                    elif "raspberry-pi-zero-2-w" in image.get("image", default):
-                                        device_arch.append(f"pi3-{arch}")
-                                    elif "raspberry-pi-zero-w" in image.get("image", default):
-                                        device_arch.append(f"pi1-{arch}")
-                                    else:
+                                    if "4" in image.get("name", "") or "4" in board_name:
                                         device_arch.append(f"pi4-{arch}")
+                                    if "3" in image.get("name", "") or "3" in board_name:
                                         device_arch.append(f"pi3-{arch}")
+                                    if "2" in image.get("name", "") or "2" in board_name:
                                         device_arch.append(f"pi2-{arch}")
 
                                     # @g0tmi1k: not happy about external OS, rather keep it in python (import lzma)
@@ -256,6 +271,11 @@ def generate_manifest(data):
 
                                     #image_download_size = os.stat(f'{imagedir}/{filename}.xz').st_size
                                     image_download_size = os.path.getsize(f"{imagedir}/{filename}.xz")
+
+                                    device_arch = list(dict.fromkeys(device_arch))
+                                    preferred_order = ["pi5", "pi4", "pi3", "pi2", "pi1"]
+                                    device_arch.sort(key=lambda x: preferred_order.index(x.split("-")[0]))
+
                                     jsonarray(
                                         devices,
                                         "os_list",
