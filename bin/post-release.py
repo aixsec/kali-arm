@@ -233,7 +233,7 @@ def generate_manifest(data):
                                         "raspberry-pi-3": "pi3",
                                         "raspberry-pi-2": "pi2",
                                         "raspberry-pi1": "pi1",
-                                        "raspberry-pi-zero-2-w": "pi3",
+                                        "raspberry-pi-zero-2-w": "pi2",
                                         "raspberry-pi-zero-w": "pi1",
                                     }
 
