@@ -220,35 +220,35 @@ def generate_manifest(data):
                                     else:
                                         arch = "32bit"
 
-                                    device_arch = []
-
-                                    # Always use the board entry the image is part of
-                                    board_name = board.get("board", "")
-                                    arch = "64bit" if "arm64" in image.get("architecture", "") else "32bit"
-
+                                    # Due to board naming, map the board slugs so that we end up with the correct devices supported list.
                                     pi_map = {
-                                        "raspberry-pi-5": "pi5",
-                                        "raspberry-pi-4": "pi4",
-                                        "raspberry-pi-400": "pi4",
-                                        "raspberry-pi-3": "pi3",
-                                        "raspberry-pi-2": "pi2",
-                                        "raspberry-pi1": "pi1",
-                                        "raspberry-pi-zero-2-w": "pi2",
-                                        "raspberry-pi-zero-w": "pi1",
+                                            "raspberry-pi-5": "pi5",
+                                            "raspberry-pi-4": "pi4",
+                                            "raspberry-pi-3": "pi3",
+                                            "raspberry-pi-2": "pi2",
+                                            "raspberry-pi1": "pi1",
+                                            "raspberry-pi-zero-2-w": "pi3",
+                                            "raspberry-pi-zero-w": "pi1",
                                     }
 
+                                    device_arch = []
 
-                                    slug_base = pi_map.get(board_name, "pi4")
-                                    device_arch.append(f"{slug_base}-{arch}")
+                                    # Loop over the RaspberryPi boards.  We have to do this because otherwise, we end up matching too loosely, or conversely, not enough.
+                                    for yaml in data["devices"]:
+                                        for vendor in yaml.keys():
+                                            if vendor != "raspberrypi":
+                                                continue
+                                            for board in yaml[vendor]:
+                                                board_name = board.get("board")
+                                                for img in board.get("images", []):
+                                                    if img.get("image") == image.get("image") and img.get("support") == "kali":
+                                                        slug = pi_map.get(board_name)
+                                                        if slug:
+                                                            device_arch.append(f"{slug}-{arch}")
 
-                                    if "5" in image.get("name", "") or "5" in board_name:
-                                        device_arch.append(f"pi5-{arch}")
-                                    if "4" in image.get("name", "") or "4" in board_name:
-                                        device_arch.append(f"pi4-{arch}")
-                                    if "3" in image.get("name", "") or "3" in board_name:
-                                        device_arch.append(f"pi3-{arch}")
-                                    if "2" in image.get("name", "") or "2" in board_name:
-                                        device_arch.append(f"pi2-{arch}")
+                                    device_arch = list(dict.fromkeys(device_arch))
+                                    preferred_order = ["pi5", "pi4", "pi3", "pi2", "pi1"]
+                                    device_arch.sort(key=lambda x: preferred_order.index(x.split("-")[0]))
 
                                     # @g0tmi1k: not happy about external OS, rather keep it in python (import lzma)
                                     try:
