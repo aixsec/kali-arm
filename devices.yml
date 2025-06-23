@@ -70,7 +70,7 @@ devices:
             kernel-version: "6.12.20+rpt"
             image-notes: ""
 
-      - board: "rasbperry-pi-3"
+      - board: "raspberry-pi-3"
         name: "Raspberry Pi 3"
         cpu: "Broadcom BCM2837"
         cpu-cores: "4"
