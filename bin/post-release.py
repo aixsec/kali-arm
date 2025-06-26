@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# ARM Devices ~ https://gitlab.com/kalilinux/build-scripts/kali-arm/-/blob/master/devices.yml
+# ARM Devices ~ https://gitlab.com/kalilinux/build-scripts/kali-arm/-/blob/main/devices.yml
 
 ###############################################
 # Script to prepare the rpi-imager json script for Kali ARM quarterly releases.
@@ -52,7 +52,7 @@ file_ext = [
 # Input:
 # ------------------------------------------------------------
 # See: ./devices.yml
-# https://gitlab.com/kalilinux/build-scripts/kali-arm/-/blob/master/devices.yml
+# https://gitlab.com/kalilinux/build-scripts/kali-arm/-/blob/main/devices.yml
 #
 # See:  ./images/*.img.sha256sum (uncompressed image sha256sum - to get the sha256sum
 #       ./images/*.img.xz.sha256sum (compressed image sha256sum - to get the sha256sum
@@ -150,7 +150,7 @@ def jsonarray(devices, vendor, name, url, extract_size, extract_sha256, image_do
         "image_download_size": image_download_size,
         "image_download_sha256": image_download_sha256,
         "devices": device_arch,
-        "init_format": "systemd",
+        "init_format": "cloudinit",
     }
 
     devices[vendor].append(jsondata)
@@ -220,20 +220,35 @@ def generate_manifest(data):
                                     else:
                                         arch = "32bit"
 
+                                    # Due to board naming, map the board slugs so that we end up with the correct devices supported list.
+                                    pi_map = {
+                                            "raspberry-pi-5": "pi5",
+                                            "raspberry-pi-4": "pi4",
+                                            "raspberry-pi-3": "pi3",
+                                            "raspberry-pi-2": "pi2",
+                                            "raspberry-pi1": "pi1",
+                                            "raspberry-pi-zero-2-w": "pi3",
+                                            "raspberry-pi-zero-w": "pi1",
+                                    }
+
                                     device_arch = []
 
-                                    if "raspberry-pi5" in image.get("image", default):
-                                        device_arch.append(f"pi5-{arch}")
-                                    elif "raspberry-pi1" in image.get("image", default):
-                                        device_arch.append(f"pi1-{arch}")
-                                    elif "raspberry-pi-zero-2-w" in image.get("image", default):
-                                        device_arch.append(f"pi3-{arch}")
-                                    elif "raspberry-pi-zero-w" in image.get("image", default):
-                                        device_arch.append(f"pi1-{arch}")
-                                    else:
-                                        device_arch.append(f"pi4-{arch}")
-                                        device_arch.append(f"pi3-{arch}")
-                                        device_arch.append(f"pi2-{arch}")
+                                    # Loop over the RaspberryPi boards.  We have to do this because otherwise, we end up matching too loosely, or conversely, not enough.
+                                    for yaml in data["devices"]:
+                                        for vendor in yaml.keys():
+                                            if vendor != "raspberrypi":
+                                                continue
+                                            for board in yaml[vendor]:
+                                                board_name = board.get("board")
+                                                for img in board.get("images", []):
+                                                    if img.get("image") == image.get("image") and img.get("support") == "kali":
+                                                        slug = pi_map.get(board_name)
+                                                        if slug:
+                                                            device_arch.append(f"{slug}-{arch}")
+
+                                    device_arch = list(dict.fromkeys(device_arch))
+                                    preferred_order = ["pi5", "pi4", "pi3", "pi2", "pi1"]
+                                    device_arch.sort(key=lambda x: preferred_order.index(x.split("-")[0]))
 
                                     # @g0tmi1k: not happy about external OS, rather keep it in python (import lzma)
                                     try:
@@ -256,6 +271,11 @@ def generate_manifest(data):
 
                                     #image_download_size = os.stat(f'{imagedir}/{filename}.xz').st_size
                                     image_download_size = os.path.getsize(f"{imagedir}/{filename}.xz")
+
+                                    device_arch = list(dict.fromkeys(device_arch))
+                                    preferred_order = ["pi5", "pi4", "pi3", "pi2", "pi1"]
+                                    device_arch.sort(key=lambda x: preferred_order.index(x.split("-")[0]))
+
                                     jsonarray(
                                         devices,
                                         "os_list",

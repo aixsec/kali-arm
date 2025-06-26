@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2154
 
+# fallback TERM if not set or set to something too basic
+if [[ -z "$TERM" || "$TERM" == "dumb" || "$TERM" == "vt220" ]]; then
+    export TERM="xterm-256color"
+fi
+
 # Print color echo
 function log() {
     local set_color="$2"
@@ -35,7 +40,7 @@ function log() {
         echo -e "[i] $1"
 
     else
-        echo -e "$color[i] $1${colour_reset}"
+        echo -e "${color[i]} $1${colour_reset}"
 
     fi
 }
@@ -81,7 +86,8 @@ function debug_enable() {
     mkdir -p ./logs/
     log "Debug: Enabled" green
     log "Output: ${log}" green
-    exec &> >(tee -a "${log}") 2>&1
+    # Pipe output to both console and log, but strip ANSI codes from log
+    exec > >(tee -a >(sed 's/\x1B\[[0-9;]*[mK]//g' >> "${log}")) 2>&1
 
     # Print all commands inside of script
     set -x
@@ -177,15 +183,60 @@ function include() {
 
 # systemd-nspawn environment
 # Putting quotes around $extra_args causes systemd-nspawn to pass the extra arguments as 1, so leave it unquoted.
+# This is left in for legacy/community scripts which call it directly until someone moves them to the new way
 function systemd-nspawn_exec() {
     log "systemd-nspawn $*" gray
-    ENV="RUNLEVEL=1,LANG=C,DEBIAN_FRONTEND=noninteractive,DEBCONF_NOWARNINGS=yes"
+    ENV1="RUNLEVEL=1"
+    ENV2="LANG=C"
+    ENV3="DEBIAN_FRONTEND=noninteractive"
+    ENV4="DEBCONF_NOWARNINGS=yes"
+    # Jenkins server doesn't have this??
+    if [ ${architecture} == "arm64" ]; then
+    #ENV5="QEMU_CPU=max,pauth-impdef=on"
+    ENV5="QEMU_CPU=cortex-a72"
+    fi
 
     if [ "$(arch)" != "aarch64" ]; then
-        systemd-nspawn --bind-ro "$qemu_bin" $extra_args --capability=cap_setfcap -E $ENV -M "$machine" -D "$work_dir" "$@"
+        # Ensure we export QEMU_CPU so its set for systemd-nspawn to use
+        if [ ${architecture} == "arm64" ]; then
+          #export QEMU_CPU=max,pauth-impdef=on
+          export QEMU_CPU=cortex-a72
+          systemd-nspawn --bind-ro "$qemu_bin" $extra_args --capability=cap_setfcap -E $ENV1 -E $ENV2 -E $ENV3 -E $ENV4 -E $ENV5 -M "$machine" -D "${work_dir}" "$@"
+        else
+          systemd-nspawn --bind-ro "$qemu_bin" $extra_args --capability=cap_setfcap -E $ENV1 -E $ENV2 -E $ENV3 -E $ENV4 -M "$machine" -D "${work_dir}" "$@"
+        fi
     else
-        systemd-nspawn $extra_args --capability=cap_setfcap -E $ENV -M "$machine" -D "$work_dir" "$@"
+        systemd-nspawn $extra_args --capability=cap_setfcap -E $ENV1 -E $ENV2 -E $ENV3 -E $ENV4 -M "$machine" -D "${work_dir}" "$@"
     fi
+}
+
+# chroot environment
+function chroot_exec() {
+    log "chroot $*" gray
+
+    # Define environment variables
+    ENV_VARS="RUNLEVEL=1 LANG=C DEBIAN_FRONTEND=noninteractive DEBCONF_NOWARNINGS=yes"
+    [ "${architecture}" == "arm64" ] && ENV_VARS="$ENV_VARS QEMU_CPU=cortex-a72"
+
+    # Ensure /proc is mounted inside chroot
+    mount --types proc /proc "${work_dir}/proc"
+
+    # Determine whether to use QEMU (only if we're cross-emulating ARM64)
+    if [ "$(arch)" != "aarch64" ] && [ "${architecture}" == "arm64" ]; then
+        USE_QEMU="$qemu_bin"
+
+        # Copy QEMU binary into chroot if it’s missing
+        if [ ! -f "${work_dir}${qemu_bin}" ]; then
+            cp "$qemu_bin" "${work_dir}${qemu_bin}"
+            chmod +x "${work_dir}${qemu_bin}"
+        fi
+    fi
+
+    # Run chroot, using QEMU only if needed
+    chroot "${work_dir}" /bin/bash -c "exec env $ENV_VARS ${*:-/bin/bash}" < /dev/stdin
+
+    # Cleanup: Unmount /proc
+    umount -lf "${work_dir}/proc"
 }
 
 # Create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
@@ -216,23 +267,29 @@ function disable_proxy() {
 
 # Mirror & suite replacement
 function restore_mirror() {
+    local default_mirror="http://http.kali.org/kali"
+    local default_suite="kali-rolling"
+
+    # Respect environment variables, allow overrides via replace_*
+    local mirror="${mirror:-$default_mirror}"
+    local suite="${suite:-$default_suite}"
+
     if [[ -n "${replace_mirror}" ]]; then
-        export mirror=${replace_mirror}
-
-    elif [[ -n "${replace_suite}" ]]; then
-        export suite=${replace_suite}
-
+        mirror="${replace_mirror}"
     fi
 
-    log "Mirror & suite replacement" gray
+    if [[ -n "${replace_suite}" ]]; then
+        suite="${replace_suite}"
+    fi
 
-    # For now, restore_mirror will put the default kali mirror in, fix after 2021.3
-    cat <<EOF >"${work_dir}"/etc/apt/sources.list
+    log "Setting APT sources to mirror: ${mirror}, suite: ${suite}" gray
+
+    cat <<EOF >"${work_dir}/etc/apt/sources.list"
 # See https://www.kali.org/docs/general-use/kali-linux-sources-list-repositories/
-deb http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware
+deb ${mirror} ${suite} main contrib non-free non-free-firmware
 
 # Additional line for source packages
-# deb-src http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware
+# deb-src ${mirror} ${suite} main contrib non-free non-free-firmware
 EOF
 }
 
@@ -242,28 +299,22 @@ function limit_cpu() {
         cpu_limit=-1
         log "CPU limiting has been disabled" yellow
         eval "${@}"
-
         return $?
-
     elif [[ ${cpu_limit:=} -gt "100" ]]; then
         log "CPU limit (${cpu_limit}) is higher than 100" yellow
         cpu_limit=100
-
     fi
 
     if [[ -z $cpu_limit ]]; then
         log "CPU limit unset" yellow
         local cpu_shares=$((num_cores * 1024))
         local cpu_quota="-1"
-
     else
         log "Limiting CPU (${cpu_limit}%)" yellow
         local cpu_shares=$((1024 * num_cores * cpu_limit / 100))  # 1024 max value per core
         local cpu_quota=$((100000 * num_cores * cpu_limit / 100)) # 100000 max value per core
-
     fi
 
-    # Random group name
     local rand
     rand=$(
         tr -cd 'A-Za-z0-9' </dev/urandom | head -c4
@@ -274,29 +325,29 @@ function limit_cpu() {
     cgset -r cpu.shares="$cpu_shares" cpulimit-"$rand"
     cgset -r cpu.cfs_quota_us="$cpu_quota" cpulimit-"$rand"
 
-    # Retry command
     local n=1
     local max=5
     local delay=2
+    local exit_code=1
 
     while true; do
-        # shellcheck disable=SC2015
-        cgexec -g cpu:cpulimit-"$rand" "$@" && break || {
-            if [[ $n -lt $max ]]; then
-                ((n++))
-                log "Command failed. Attempt $n/$max" red
-                sleep $delay
+        cgexec -g cpu:cpulimit-"$rand" "$@"
+        exit_code=$?
 
-            else
-                log "The command has failed after $n attempts" yellow
-                break
-
-            fi
-        }
-
+        if [[ $exit_code -eq 0 ]]; then
+            break
+        elif [[ $n -lt $max ]]; then
+            ((n++))
+            log "Command failed. Attempt $n/$max" red
+            sleep $delay
+        else
+            log "The command has failed after $n attempts" yellow
+            break
+        fi
     done
 
     cgdelete -g cpu:/cpulimit-"$rand"
+    return $exit_code
 }
 
 function sources_list() {
@@ -423,25 +474,52 @@ function print_config() {
 function make_image() {
     # Calculate the space to create the image.
     root_size=$(du -s -B1 "${work_dir}" --exclude="${work_dir}"/boot | cut -f1)
-    root_extra=$((root_size * 5 * 1024 / 5 / 1024 / 1000))
-    raw_size=$(($((free_space * 1024)) + root_extra + $((bootsize * 1024)) + 4096))
-    img_size=$(echo "${raw_size}"Ki | numfmt --from=iec-i --to=si)
+    root_extra=$((root_size / 1000))
+    raw_size=$(( (root_size / 1024) + (free_space * 1024) + (root_extra / 1024)  + (bootsize * 1024) + 4))
+    padding=$(( (512 - (raw_size % 512)) % 512 ))
+    padded_size=$(( raw_size + padding ))
+    img_size=$(echo "${padded_size}"Ki | numfmt --from=iec-i --to=si)
 
     # Create the disk image
     log "Creating image file:${colour_reset} ${image_name}.img (Size: ${img_size})" white
-    [ -d ${image_dir} ] || mkdir -p "${image_dir}/"
-    fallocate -l "${img_size}" "${image_dir}/${image_name}.img"
+    [ -d "${image_dir}" ] || mkdir -p "${image_dir}/"
+    fallocate -l "${padded_size}"K "${image_dir}/${image_name}.img"
+}
+
+# Make sure that the loopdevice is available.
+function ensure_loopdevice() {
+    local img_file="$1"
+    local loopdev
+    local retry_attempts=5  # Number of retry attempts
+    local retry_interval=1  # Time in seconds between retries
+    for attempt in $(seq 1 "$retry_attempts"); do
+        loopdev=$(losetup --show -fP "$img_file")
+        # Add a sleep to let the devices settle
+        sleep 3
+        if [ -b "${loopdev}" ]; then
+            # The echo below is intentional and crucial. It ensures the function outputs
+            # the loop device path (e.g., /dev/loop0) as its return value.
+            # Do NOT remove or replace it with a log statement, as other parts of the script
+            # rely on this output to use the loop device.
+            echo ${loopdev}
+            return 0
+        fi
+        log "Retrying to set up loop device (attempt $attempt)..."
+        sleep "$retry_interval"
+    done
+    log "Failed to set up loop device for $img after $retry_attempts attempts."
+    return 1
 }
 
 # Set the partition variables
 function make_loop() {
     img="${image_dir}/${image_name}.img"
-    num_parts=$(fdisk -l $img | grep "${img}[1-2]" | wc -l)
+    num_parts=$(fdisk -l "$img" | grep -c "${img}[1-2]")
 
     if [ "$num_parts" = "2" ]; then
         extra=1
-        part_type1=$(fdisk -l $img | grep ${img}1 | awk '{print $6}')
-        part_type2=$(fdisk -l $img | grep ${img}2 | awk '{print $6}')
+        part_type1=$(fdisk -l "$img" | grep "${img}"1 | awk '{print $6}')
+        part_type2=$(fdisk -l "$img" | grep "${img}"2 | awk '{print $6}')
 
         if [[ "$part_type1" == "c" ]]; then
             bootfstype="vfat"
@@ -451,13 +529,21 @@ function make_loop() {
 
         fi
 
+        if [[ "$bootfstype" == "vfat" ]]; then
+            boot_uuid_n="$(cat < /proc/sys/kernel/random/uuid | cut -d- -f2-3)"
+            boot_uuid="$(echo "$boot_uuid_n" | tr '[:lower:]' '[:upper:]')"
+            boot_uuid_n="$(echo "$boot_uuid_n" | tr -d -)"
+        else
+            boot_uuid="$(cat < /proc/sys/kernel/random/uuid)"
+        fi
+
         rootfstype=${rootfstype:-"$fstype"}
-        loopdevice=$(losetup --show -fP "$img")
+        loopdevice=$(ensure_loopdevice "$img")
         bootp="${loopdevice}p1"
         rootp="${loopdevice}p2"
 
     elif [ "$num_parts" = "1" ]; then
-        part_type1=$(fdisk -l $img | grep ${img}1 | awk '{print $6}')
+        part_type1=$(fdisk -l "$img" | grep "${img}"1 | awk '{print $6}')
 
         if [[ "$part_type1" == "83" ]]; then
             rootfstype=${rootfstype:-"$fstype"}
@@ -465,7 +551,7 @@ function make_loop() {
         fi
 
         rootfstype=${rootfstype:-"$fstype"}
-        loopdevice=$(losetup --show -fP "$img")
+        loopdevice=$(ensure_loopdevice "$img")
         rootp="${loopdevice}p1"
 
     fi
@@ -482,7 +568,7 @@ UUID=$root_uuid /               $rootfstype errors=remount-ro 0       1
 EOF
 
     if ! [ -z "$bootp" ]; then
-        echo "LABEL=BOOT      /boot           $bootfstype    defaults          0       2" >>"${work_dir}"/etc/fstab
+        echo "UUID=$boot_uuid      /boot           $bootfstype    defaults          0       2" >>"${work_dir}"/etc/fstab
 
     fi
 
@@ -503,15 +589,15 @@ function mkfs_partitions() {
     if [ -n "${bootp}" ]; then
         case $bootfstype in
             vfat)
-                mkfs.vfat -n BOOT -F 32 "${bootp}" ;;
+                mkfs.vfat -i "$boot_uuid_n" -n BOOT -F 32 "${bootp}" ;;
 
             ext4)
-                features="^64bit,^metadata_csum"; 
-                mkfs -O "$features" -t "$fstype" -L BOOT "${bootp}" ;;
+                features="^64bit,^metadata_csum";
+                mkfs -U "$boot_uuid" -O "$features" -t "$fstype" -L BOOT "${bootp}" ;;
 
             ext2 | ext3)
                 features="^64bit"
-                mkfs -O "$features" -t "$fstype" -L BOOT "${bootp}" ;;
+                mkfs -U "$boot_uuid" -O "$features" -t "$fstype" -L BOOT "${bootp}" ;;
 
         esac
 
@@ -580,12 +666,24 @@ function umount_partitions() {
     # Make sure we are somewhere we are not going to unmount
     cd "${repo_dir}/"
 
-    # If there is boot partition, unmount that first. Else continue as not every ARM device has one
-    [ -n "${bootp}" ] &&
-        ! mountpoint -q "${base_dir}/root/boot" || umount -q "${base_dir}/root/boot" ||
-        true
+    # Run a sync to flush any cached data
+    sync
+    # Define possible mounted points
+    # This function is called both if success and failed
+    # If we fail early in the process, then work_dir may still have proc mounted
+    possible_mounts=("${base_dir}/root/boot" "${base_dir}/root/boot/firmware" "${base_dir}/root/proc" "${work_dir}/proc")
 
-    ! mountpoint -q "${base_dir}/root" || umount -q "${base_dir}/root"
+    # Unmount boot partitions if they exist
+    for mount in "${possible_mounts[@]}"; do
+        if mountpoint -q "$mount"; then
+            umount -q "$mount"
+        fi
+    done
+
+    # Unmount root partition
+    if mountpoint -q "${base_dir}/root"; then
+        umount -q "${base_dir}/root"
+    fi
 }
 
 # Clean up all the temporary build stuff and remove the directories.

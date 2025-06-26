@@ -40,10 +40,10 @@ suite=${suite:-"kali-rolling"}
 locale="en_US.UTF-8"
 
 # Free space rootfs in MiB
-free_space="300"
+free_space="${free_space:-1024}"
 
 # /boot partition in MiB
-bootsize="256"
+bootsize="${bootsize:-256}"
 
 # Select compression, xz or none
 compress="xz"
@@ -107,7 +107,7 @@ if [ -f "${repo_dir}"/builder.txt ]; then
 
 fi
 
-# Incase `su` was used
+# In case `su` was used
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 ## From ./common.d/functions.sh

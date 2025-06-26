@@ -6,6 +6,7 @@
 # This is a community script - you will need to generate your own image to use
 # More information: https://www.kali.org/docs/arm/gateworks-newport/
 #
+set -e
 
 # Hardware model
 hw_model=${hw_model:-"gateworks-newport"}
@@ -39,6 +40,9 @@ echo "T1:12345:respawn:/sbin/getty -L ttymxc1 115200 vt100" >> /etc/inittab
 
 status_stage3 'Fixup wireless-regdb signature'
 update-alternatives --set regulatory.db /lib/firmware/regulatory.db-upstream
+
+status_stage3 'Remove cloud-init where it is not used'
+eatmydata apt-get -y purge --autoremove cloud-init
 EOF
 
 # Run third stage
@@ -111,9 +115,8 @@ raw_size=$(($((${free_space} * 1024)) + ${root_extra}))
 status "Creating image file ${image_name}.img"
 mkdir -p "${image_dir}"
 wget http://dev.gateworks.com/newport/boot_firmware/firmware-newport.img -O "${image_dir}/${image_name}.img"
-fallocate -l $(echo ${raw_size}Ki | numfmt --from=iec-i --to=si) "${base_dir}/${image_name}.img"
-dd if="${base_dir}/${image_name}.img" of="${image_dir}/${image_name}.img" bs=16M seek=1
-echo ", +" | sfdisk -N 2 "${image_dir}/${image_name}.img"
+truncate -s $(echo ${raw_size}Ki | numfmt --from=iec-i --to=si) "${image_dir}/${image_name}.img"
+echo ", +" | sfdisk -N 2 "${image_dir}/${image_name}.img" > /dev/null 2>&1
 
 # Set the partition variables
 make_loop
@@ -139,6 +142,11 @@ fi
 status "Rsyncing rootfs into image file"
 rsync -HPavz -q ${work_dir}/ ${base_dir}/root/
 sync
+
+status "Make sure second partition is not marked as bootable"
+if fdisk -l "$img" | awk '/img2/ {print $2}' | grep -q '*' > /dev/null 2>&1 ; then
+    echo -e "a\n2\nw" | fdisk "$img" > /dev/null 2>&1
+fi
 
 # Load default finish_image configs
 include finish_image

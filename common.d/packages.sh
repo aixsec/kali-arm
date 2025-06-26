@@ -2,18 +2,17 @@
 
 log "Selecting packages..." gray
 
-debootstrap_base="kali-archive-keyring,eatmydata,usrmerge"
+debootstrap_base="kali-archive-keyring,eatmydata,usrmerge,ca-certificates"
 
 # This is the bare minimum if you want to start from very scratch
-minimal_pkgs="ca-certificates haveged iw network-manager parted polkitd-pkla \
-sudo wpasupplicant"
+minimal_pkgs="ca-certificates cloud-init haveged iw netplan.io network-manager \
+parted rsyslog sudo wpasupplicant"
 
 # This is the list of minimal common packages
 common_min_pkgs="$minimal_pkgs apt-transport-https command-not-found \
-fontconfig ifupdown kali-defaults kali-tweaks man-db net-tools \
-netcat-traditional pciutils plocate psmisc rfkill screen snmp snmpd tftp-hpa tmux unrar \
-usbutils vim wireless-regdb zerofree zsh zsh-autosuggestions \
-zsh-syntax-highlighting"
+fontconfig ifupdown kali-defaults kali-tweaks man-db net-tools netcat-traditional \
+pciutils plocate psmisc rfkill screen snmp snmpd ssh-import-id tftp-hpa tmux unrar \
+usbutils vim wireless-regdb zerofree zsh zsh-autosuggestions zsh-syntax-highlighting"
 
 # This is the list of common packages
 common_pkgs="$minimal_pkgs apt-transport-https dialog \
@@ -36,11 +35,9 @@ cli_tools_pkgs="kali-linux-headless"
 case $desktop in
     xfce | gnome | kde | i3 | lxde | mate | e17)
         desktop_pkgs="kali-desktop-$desktop kali-linux-default alsa-utils \
-        xfonts-terminus xinput xserver-xorg-video-fbdev xserver-xorg-input-libinput \
-        texlive-fonts-recommended- texlive-latex-base- texlive-latex-extra- \
-        texlive-latex-recommended- texlive-pictures-" ;;
+        xfonts-terminus xinput xserver-xorg-video-fbdev xserver-xorg-input-libinput" ;;
 
-    none | slim | miminal) 
+    none | slim | miminal)
         variant="minimal"; minimal="1"; desktop_pkgs="" ;;
 
 esac
@@ -93,5 +90,5 @@ kalipi-re4son-firmware kalipi-tft-config pi-bluetooth"
 
 # Pi-Tail specific packages
 pitail_pkgs="bluelog blueranger bluesnarfer bluez-tools bridge-utils cmake \
-darkstat dnsmasq htop libusb-1.0-0-dev locate mailutils pure-ftpd \
-tightvncpasswd tigervnc-standalone-server wifiphisher"
+darkstat dnsmasq htop isc-dhcp-client libusb-1.0-0-dev locate mailutils \
+pure-ftpd tightvncpasswd tigervnc-standalone-server wifiphisher"
