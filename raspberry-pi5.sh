@@ -62,7 +62,7 @@ make
 make install
 
 status_stage3 'Install the kernel'
-eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-2712 linux-image-rpi-v8 linux-headers-rpi-2712 linux-headers-rpi-v8 brcmfmac-nexmon-dkms
+eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-2712 linux-image-rpi-v8 linux-headers-rpi-2712 linux-headers-rpi-v8 brcmfmac-nexmon-dkms firmware-nexmon
 
 status_stage3 'Set up cloud-init'
 install -m644 /bsp/cloudinit/user-data /boot/firmware
@@ -91,18 +91,8 @@ EOF
 # Run third stage
 include third_stage
 
-# Firmware needed for the wifi
-cd "${work_dir}"
-status 'Clone Wi-Fi/Bluetooth firmware'
-git clone --quiet --depth 1 https://github.com/rpi-distro/firmware-nonfree
-cd firmware-nonfree/debian/config/brcm80211
-rsync -HPaz brcm "${work_dir}"/lib/firmware/
-rsync -HPaz cypress "${work_dir}"/lib/firmware/
-cd "${work_dir}"/lib/firmware/cypress
-ln -sf cyfmac43455-sdio-standard.bin cyfmac43455-sdio.bin
-rm -rf "${work_dir}"/firmware-nonfree
-
-# bluetooth firmware
+status 'Download bluetooth firmware'
+mkdir -p "${work_dir}"/lib/firmware/brcm/
 wget -q 'https://github.com/RPi-Distro/bluez-firmware/raw/bookworm/debian/firmware/broadcom/BCM4345C0.hcd' -O "${work_dir}"/lib/firmware/brcm/BCM4345C0.hcd
 
 cd "${repo_dir}/"

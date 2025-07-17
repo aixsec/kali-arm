@@ -43,18 +43,13 @@ make install
 
 status_stage3 'Install the kernel'
 if [[ "${architecture}" == "arm64" ]]; then
-eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-2712 linux-image-rpi-v8 linux-headers-rpi-2712 linux-headers-rpi-v8 brcmfmac-nexmon-dkms pi-bluetooth
+eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-2712 linux-image-rpi-v8 linux-headers-rpi-2712 linux-headers-rpi-v8 brcmfmac-nexmon-dkms pi-bluetooth firmware-nexmon
 else
-eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-v7 linux-image-rpi-v7l linux-headers-rpi-v7 linux-headers-rpi-v7l brcmfmac-nexmon-dkms pi-bluetooth
+eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-v7 linux-image-rpi-v7l linux-headers-rpi-v7 linux-headers-rpi-v7l brcmfmac-nexmon-dkms pi-bluetooth firmware-nexmon
 fi
 
 status_stage3 'Modify update-initramfs.conf to regenerate all initramfs'
 sed -i -e 's/=yes/=all/g' /etc/initramfs-tools/update-initramfs.conf
-
-status_stage3 'Create symlink for Raspberry Pi 4 Compute Module'
-pushd /lib/firmware/brcm/ > /dev/null
-ln -s ./brcmfmac43455-sdio.raspberrypi,4-model-b.txt ./brcmfmac43455-sdio.raspberrypi,4-compute-module.txt
-popd > /dev/null
 
 status_stage3 'Copy script for handling wpa_supplicant file'
 install -m755 /bsp/scripts/copy-user-wpasupplicant.sh /usr/bin/
@@ -106,18 +101,8 @@ EOF
 # Run third stage
 include third_stage
 
-# Firmware needed for the wifi
-cd "${work_dir}"
-status 'Clone Wi-Fi/Bluetooth firmware'
-git clone --quiet --depth 1 https://github.com/rpi-distro/firmware-nonfree
-cd firmware-nonfree/debian/config/brcm80211
-rsync -HPaz brcm "${work_dir}"/lib/firmware/
-rsync -HPaz cypress "${work_dir}"/lib/firmware/
-cd "${work_dir}"/lib/firmware/cypress
-ln -sf cyfmac43455-sdio-standard.bin cyfmac43455-sdio.bin
-rm -rf "${work_dir}"/firmware-nonfree
-
-# bluetooth firmware
+status 'Download bluetooth firmware'
+mkdir -p "${work_dir}"/lib/firmware/brcm
 wget -q 'https://github.com/RPi-Distro/bluez-firmware/raw/bookworm/debian/firmware/broadcom/BCM4345C0.hcd' -O "${work_dir}"/lib/firmware/brcm/BCM4345C0.hcd
 
 cd "${repo_dir}/"
