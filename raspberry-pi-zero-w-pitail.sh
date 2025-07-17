@@ -105,9 +105,9 @@ make install
 
 status_stage3 'Install the kernel'
 if [[ "${architecture}" == "armhf" ]]; then
-eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-v7 linux-image-rpi-v7l linux-headers-rpi-v7 linux-headers-rpi-v7l brcmfmac-nexmon-dkms pi-bluetooth
+eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-v7 linux-image-rpi-v7l linux-headers-rpi-v7 linux-headers-rpi-v7l brcmfmac-nexmon-dkms pi-bluetooth firmware-nexmon
 else
-eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-v6 linux-headers-rpi-v6 brcmfmac-nexmon-dkms pi-bluetooth
+eatmydata apt-get -y -q install raspi-firmware linux-image-rpi-v6 linux-headers-rpi-v6 brcmfmac-nexmon-dkms pi-bluetooth firmware-nexmon
 fi
 
 status_stage3 'Modify update-initramfs.conf to regenerate all initramfs'
@@ -215,18 +215,8 @@ cat <<EOF >${work_dir}/etc/udev/rules.d/70-persistent-net.rules
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="wlan*", NAME="wlan1"
 EOF
 
-# Firmware needed for the wifi
-cd "${work_dir}"
-status 'Clone Wi-Fi/Bluetooth firmware'
-git clone --quiet --depth 1 https://github.com/rpi-distro/firmware-nonfree
-cd firmware-nonfree/debian/config/brcm80211
-rsync -HPaz brcm "${work_dir}"/lib/firmware/
-rsync -HPaz cypress "${work_dir}"/lib/firmware/
-cd "${work_dir}"/lib/firmware/cypress
-ln -sf cyfmac43455-sdio-standard.bin cyfmac43455-sdio.bin
-rm -rf "${work_dir}"/firmware-nonfree
-
-# bluetooth firmware
+status 'Download bluetooth firmware'
+mkdir -p "${work_dir}"/lib/firmware/brcm/
 wget -q 'https://github.com/RPi-Distro/bluez-firmware/raw/bookworm/debian/firmware/broadcom/BCM4345C0.hcd' -O "${work_dir}"/lib/firmware/brcm/BCM4345C0.hcd
 
 cd "${repo_dir}/"
