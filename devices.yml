@@ -58,7 +58,6 @@ devices:
             kernel: "custom"
             kernel-version: "6.12.20+rpt"
             image-notes: ""
-
           - image: "raspberry-pi-arm64.img"
             name: "Raspberry Pi 3, 4, 400, 5 and 500 (64-bit)"
             architecture: "arm64"
@@ -96,7 +95,6 @@ devices:
             kernel: "custom"
             kernel-version: "6.12.20+rpt"
             image-notes: ""
-
           - image: "raspberry-pi-arm64.img"
             name: "Raspberry Pi 3, 4, 400, 5 and 500 (64-bit)"
             architecture: "arm64"
@@ -135,7 +133,6 @@ devices:
             kernel: "custom"
             kernel-version: "6.12.20+rpt"
             image-notes: ""
-
           - image: "raspberry-pi-arm64.img"
             name: "Raspberry Pi 3, 4, 400, 5 and 500 (64-bit)"
             architecture: "arm64"
@@ -173,7 +170,6 @@ devices:
             kernel: "custom"
             kernel-version: "6.12.20+rpt"
             image-notes: ""
-
           - image: "raspberry-pi-arm64.img"
             name: "Raspberry Pi 3, 4, 400, 5 and 500 (64-bit)"
             architecture: "arm64"
@@ -232,7 +228,7 @@ devices:
             name: "Raspberry Pi 1 (Original)"
             architecture: "armel"
             preferred-image: "false"
-            support: "kali"
+            support: "eol"
             slug: "raspberry-pi"
             build-script: "raspberry-pi1.sh"
             kernel: "custom"
@@ -265,7 +261,6 @@ devices:
             kernel: "custom"
             kernel-version: "6.12.20+rpt"
             image-notes: ""
-
           - image: "raspberry-pi-zero-2-w-pitail-armhf.img"
             name: "Raspberry Pi Zero 2 W (Pi-Tail)"
             architecture: "armhf"
@@ -297,24 +292,22 @@ devices:
             name: "Raspberry Pi Zero W"
             architecture: "armel"
             preferred-image: "true"
-            support: "kali"
+            support: "eol"
             slug: "raspberry-pi-zero-w"
             build-script: "raspberry-pi-zero-w.sh"
             kernel: "custom"
             kernel-version: "6.12.20+rpt"
             image-notes: ""
-
           - image: "raspberry-pi-zero-w-pitail-armel.img"
             name: "Raspberry Pi Zero W (Pi-Tail)"
             architecture: "armel"
             preferred-image: "false"
-            support: "kali"
+            support: "eol"
             slug: "raspberry-pi-zero-w-pi-tail"
             build-script: "raspberry-pi-zero-w-pitail.sh"
             kernel: "custom"
             kernel-version: "6.12.20+rpt"
             image-notes: ""
-
           - image: "raspberry-pi-zero-w-p4wnp1-aloa-armel.img"
             name: "Raspberry Pi Zero W (P4wnP1 A.L.O.A)"
             architecture: "armel"
@@ -1455,7 +1448,6 @@ devices:
             kernel: "custom"
             kernel-version: "5.10.208"
             image-notes: ""
-
           - image: "radxa-zero-sdcard-arm64.img"
             name: "Radxa Zero (sdcard)"
             architecture: "arm64"
