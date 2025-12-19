@@ -17,7 +17,7 @@ work_dir="${base_dir}/working"
 image_dir="${repo_dir}/images"
 
 # Version Kali release
-version=${version:-$(cat ${repo_dir}/.release)}
+version=${version:-rolling}
 
 # Custom image file name variable - MUST NOT include .img at the end
 image_name=${image_name:-"kali-linux-${version}-${hw_model}-${variant}"}
@@ -40,10 +40,10 @@ suite=${suite:-"kali-rolling"}
 locale="en_US.UTF-8"
 
 # Free space rootfs in MiB
-free_space="300"
+free_space="${free_space:-1024}"
 
 # /boot partition in MiB
-bootsize="256"
+bootsize="${bootsize:-256}"
 
 # Select compression, xz or none
 compress="xz"
@@ -73,7 +73,7 @@ cpu_limit="-1"
 mirror=${mirror:-"http://http.kali.org/kali"}
 
 # Use packages from the listed components of the archive
-components="main,contrib,non-free"
+components="main,contrib,non-free,non-free-firmware"
 
 # GitLab URL Kali repository
 kaligit="https://gitlab.com/kalilinux"
@@ -95,7 +95,8 @@ export MALLOC_CHECK_=0
 
 # Load build configuration
 if [ -f "${repo_dir}"/builder.txt ]; then
-  echo "Loading: "${repo_dir}"/builder.txt"
+  log "Loading: "${repo_dir}"/builder.txt"
+  
   # shellcheck source=/dev/null
   source "${repo_dir}"/builder.txt
 
@@ -103,9 +104,10 @@ if [ -f "${repo_dir}"/builder.txt ]; then
     && grep -v '#' "${repo_dir}"/builder.txt \
       | sort -u \
     || true
+
 fi
 
-# Incase `su` was used
+# In case `su` was used
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 ## From ./common.d/functions.sh
@@ -116,3 +118,4 @@ status_t=$(($(grep '.*status ' $0 common.d/*.sh | wc -l) -1))
 
 ## Enable colour (--no-colour)
 colour_output="${colour_output:-yes}"
+colour_reset=${colour_reset:-$( tput sgr0 )}

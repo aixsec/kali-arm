@@ -3,14 +3,16 @@
 # Kali Linux ARM build-script for NanoPi NEO Plus2 (64-bit)
 # Source: https://gitlab.com/kalilinux/build-scripts/kali-arm
 #
-# This is a supported device - which you can find pre-generated images on: https://www.kali.org/get-kali/
+# This is a community script - you will need to generate your own image to use
 # More information: https://www.kali.org/docs/arm/nanopi-neo-plus2/
 #
 
 # Hardware model
 hw_model=${hw_model:-"nanopi-neo-plus2"}
+
 # Architecture
 architecture=${architecture:-"arm64"}
+
 # Desktop manager (xfce, gnome, i3, kde, lxde, mate, e17 or none)
 desktop=${desktop:-"xfce"}
 
@@ -22,9 +24,9 @@ basic_network
 add_interface eth0
 
 # Third stage
-cat <<EOF >> "${work_dir}"/third-stage
+cat <<EOF >>"${work_dir}"/third-stage
 status_stage3 'Install kernel and bootloader packages'
-eatmydata apt-get install -y linux-image-arm64 u-boot-menu u-boot-sunxi firmware-brcm80211
+eatmydata apt-get install -y kali-sbc-allwinner linux-image-arm64 firmware-brcm80211
 
 # Note: This just creates an empty /boot/extlinux/extlinux.conf for us to use
 # later.
@@ -36,6 +38,9 @@ systemctl set-default multi-user
 
 status_stage3 'Enable login over serial (No password)'
 echo "T0:23:respawn:/sbin/agetty -L ttyAMA0 115200 vt100" >> /etc/inittab
+
+status_stage3 'Remove cloud-init where it is not used'
+eatmydata apt-get -y purge --autoremove cloud-init
 EOF
 
 # Run third stage
@@ -67,8 +72,10 @@ parted -s -a minimal "${image_dir}/${image_name}.img" mkpart primary $fstype 32M
 
 # Set the partition variables
 make_loop
+
 # Create file systems
 mkfs_partitions
+
 # Make fstab.
 make_fstab
 
@@ -78,15 +85,17 @@ mkdir -p "${base_dir}"/root/
 mount "${rootp}" "${base_dir}"/root
 
 status "Edit the extlinux.conf file to set root uuid and proper name"
+
 # Ensure we don't have root=/dev/sda3 in the extlinux.conf which comes from running u-boot-menu in a cross chroot
 # We do this down here because we don't know the UUID until after the image is created
 sed -i -e "0,/root=.*/s//root=UUID=$root_uuid rootfstype=$fstype console=tty1 consoleblank=0 ro rootwait/g" ${work_dir}/boot/extlinux/extlinux.conf
+
 # And we remove the "GNU/Linux because we don't use it
 sed -i -e "s|.*GNU/Linux Rolling|menu label Kali Linux|g" ${work_dir}/boot/extlinux/extlinux.conf
 
 status "Set the default options in /etc/default/u-boot"
-echo 'U_BOOT_MENU_LABEL="Kali Linux"' >> ${work_dir}/etc/default/u-boot
-echo 'U_BOOT_PARAMETERS="console=tty1 consoleblank=0 ro rootwait"' >> ${work_dir}/etc/default/u-boot
+echo 'U_BOOT_MENU_LABEL="Kali Linux"' >>${work_dir}/etc/default/u-boot
+echo 'U_BOOT_PARAMETERS="console=tty1 consoleblank=0 ro rootwait"' >>${work_dir}/etc/default/u-boot
 
 status "Rsyncing rootfs into image file"
 rsync -HPavz -q "${work_dir}"/ "${base_dir}"/root/
